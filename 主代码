@@ -1,0 +1,250 @@
+import csv
+from collections import defaultdict
+
+class AccountingSystem:
+    def __init__(self):
+        self.subjects = {}  # 科目字典 {科目编号: 科目信息}
+        self.vouchers = []  # 凭证列表
+        self.load_data()
+
+    def load_data(self):
+        # 加载科目
+        try:
+            with open('subjects.csv', 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    self.subjects[row['code']] = {
+                        'name': row['name'],
+                        'category': row['category'],
+                        'initial_balance': float(row['initial_balance'])
+                    }
+        except FileNotFoundError:
+            pass
+
+        # 加载凭证
+        try:
+            with open('vouchers.csv', 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                current_voucher = None
+                for row in reader:
+                    if not current_voucher or current_voucher['voucher_no'] != row['voucher_no']:
+                        current_voucher = {
+                            'voucher_no': row['voucher_no'],
+                            'date': row['date'],
+                            'description': row['description'],
+                            'entries': []
+                        }
+                        self.vouchers.append(current_voucher)
+                    current_voucher['entries'].append({
+                        'subject_code': row['subject_code'],
+                        'direction': row['direction'],
+                        'amount': float(row['amount'])
+                    })
+        except FileNotFoundError:
+            pass
+
+    def save_data(self):
+        # 保存科目
+        with open('subjects.csv', 'w', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['code', 'name', 'category', 'initial_balance'])
+            for code, data in self.subjects.items():
+                writer.writerow([code, data['name'], data['category'], data['initial_balance']])
+
+        # 保存凭证
+        with open('vouchers.csv', 'w', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['voucher_no', 'date', 'description', 'subject_code', 'direction', 'amount'])
+            for voucher in self.vouchers:
+                for entry in voucher['entries']:
+                    writer.writerow([
+                        voucher['voucher_no'],
+                        voucher['date'],
+                        voucher['description'],
+                        entry['subject_code'],
+                        entry['direction'],
+                        entry['amount']
+                    ])
+
+    def add_subject(self):
+        code = input("请输入科目编号：")
+        if code in self.subjects:
+            print("科目已存在！")
+            return
+
+        name = input("请输入科目名称：")
+        category = input("请输入科目类别（资产/负债/权益/收入/费用）：")
+        initial_balance = float(input("请输入初始余额："))
+        
+        self.subjects[code] = {
+            'name': name,
+            'category': category,
+            'initial_balance': initial_balance
+        }
+        print("科目添加成功！")
+
+    def input_voucher(self):
+        voucher_no = input("请输入凭证号：")
+        date = input("请输入日期（YYYY-MM-DD）：")
+        description = input("请输入摘要：")
+        entries = []
+        total_debit = 0
+        total_credit = 0
+
+        while True:
+            subject_code = input("请输入科目编号（留空结束输入）：")
+            if not subject_code:
+                break
+            
+            if subject_code not in self.subjects:
+                print("科目不存在！")
+                continue
+
+            direction = input("请输入方向（借/贷）：").strip()
+            if direction not in ['借', '贷']:
+                print("方向必须为借或贷！")
+                continue
+
+            try:
+                amount = float(input("请输入金额："))
+            except ValueError:
+                print("金额格式错误！")
+                continue
+
+            entries.append({
+                'subject_code': subject_code,
+                'direction': direction,
+                'amount': amount
+            })
+
+            if direction == '借':
+                total_debit += amount
+            else:
+                total_credit += amount
+
+        if total_debit != total_credit:
+            print("借贷不平，凭证无效！")
+            return
+
+        self.vouchers.append({
+            'voucher_no': voucher_no,
+            'date': date,
+            'description': description,
+            'entries': entries
+        })
+        print("凭证保存成功！")
+
+    def show_general_ledger(self):
+        ledger = defaultdict(lambda: {'debit': 0, 'credit': 0})
+        
+        # 初始化期初余额
+        for code, subject in self.subjects.items():
+            ledger[code]['initial'] = subject['initial_balance']
+
+        # 计算发生额
+        for voucher in self.vouchers:
+            for entry in voucher['entries']:
+                code = entry['subject_code']
+                if entry['direction'] == '借':
+                    ledger[code]['debit'] += entry['amount']
+                else:
+                    ledger[code]['credit'] += entry['amount']
+
+        # 显示总账
+        print("\n{:<10} {:<20} {:<10} {:<10} {:<10} {:<10}".format(
+            "科目编号", "科目名称", "期初余额", "本期借方", "本期贷方", "期末余额"))
+        for code in sorted(self.subjects.keys()):
+            subject = self.subjects[code]
+            initial = ledger[code]['initial']
+            debit = ledger[code]['debit']
+            credit = ledger[code]['credit']
+            
+            if subject['category'] in ['资产', '费用']:
+                ending = initial + debit - credit
+            else:
+                ending = initial + credit - debit
+
+            print("{:<12} {:<20} {:<12.2f} {:<12.2f} {:<12.2f} {:<12.2f}".format(
+                code, subject['name'], initial, debit, credit, ending))
+
+    def show_balance_sheet(self):
+        # 计算各科目期末余额
+        ledger = defaultdict(float)
+        for code, subject in self.subjects.items():
+            ledger[code] = subject['initial_balance']
+
+        for voucher in self.vouchers:
+            for entry in voucher['entries']:
+                code = entry['subject_code']
+                amount = entry['amount']
+                if entry['direction'] == '借':
+                    if self.subjects[code]['category'] in ['资产', '费用']:
+                        ledger[code] += amount
+                    else:
+                        ledger[code] -= amount
+                else:
+                    if self.subjects[code]['category'] in ['资产', '费用']:
+                        ledger[code] -= amount
+                    else:
+                        ledger[code] += amount
+
+        # 汇总各分类金额
+        assets = 0
+        liabilities = 0
+        equity = 0
+        income = 0
+        expenses = 0
+
+        for code, balance in ledger.items():
+            category = self.subjects[code]['category']
+            if category == '资产':
+                assets += balance
+            elif category == '负债':
+                liabilities += balance
+            elif category == '权益':
+                equity += balance
+            elif category == '收入':
+                income += balance
+            elif category == '费用':
+                expenses += balance
+
+        # 计算净利润
+        net_profit = income - expenses
+        equity += net_profit
+
+        print("\n资产负债表：")
+        print("资产总计：{:.2f}".format(assets))
+        print("负债总计：{:.2f}".format(liabilities))
+        print("所有者权益总计：{:.2f}".format(equity))
+        print("负债和所有者权益总计：{:.2f}".format(liabilities + equity))
+
+def main():
+    system = AccountingSystem()
+    
+    while True:
+        print("\n会计电算化系统")
+        print("1. 添加科目")
+        print("2. 录入凭证")
+        print("3. 显示总账")
+        print("4. 显示资产负债表")
+        print("5. 退出系统")
+        
+        choice = input("请选择操作：")
+        
+        if choice == '1':
+            system.add_subject()
+        elif choice == '2':
+            system.input_voucher()
+        elif choice == '3':
+            system.show_general_ledger()
+        elif choice == '4':
+            system.show_balance_sheet()
+        elif choice == '5':
+            system.save_data()
+            print("系统数据已保存，再见！")
+            break
+        else:
+            print("无效的输入，请重新选择！")
+
+if __name__ == "__main__":
+    main()
